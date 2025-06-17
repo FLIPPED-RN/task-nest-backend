@@ -7,26 +7,68 @@ import { Repository } from 'typeorm';
 export class AuthorsService {
   constructor(
     @InjectRepository(Author)
-    private authorsRepository: Repository<Author>,
+    private readonly repo: Repository<Author>,
   ) {}
 
-  findAll(): Promise<Author[]> {
-    return this.authorsRepository.find({relations: ['compositions']});
+  async findAll(query: {
+    search?: string;
+    sort?: string[];
+    order?: ('ASC' | 'DESC')[];
+    page: number;
+    limit: number;
+  }): Promise<Author[]> {
+    const {
+      search,
+      sort = ['name'],
+      order = ['ASC'],
+      page,
+      limit,
+    } = query;
+
+    const qb = this.repo.createQueryBuilder('author')
+      .leftJoinAndSelect('author.compositions', 'composition');
+
+    if (search) {
+      qb.where('LOWER(author.name) LIKE LOWER(:search)', {
+        search: `%${search}%`,
+      });
+    }
+
+    sort.forEach((field, idx) => {
+      const dir = order[idx] ?? 'ASC';
+      qb.addOrderBy(`author.${field}`, dir);
+    });
+
+    return qb
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getMany();
   }
 
-  async findOne(id: number): Promise<Author | null> {
-    const author = await this.authorsRepository.findOneBy({id});
+  async findOne(id: number): Promise<Author> {
+    const author = await this.repo.findOne({
+      where: { id },
+      relations: ['compositions'],
+    });
+
     if (!author) {
       throw new NotFoundException(`Автор с id ${id} не найден`);
     }
+
     return author;
   }
 
   async create(author: Author): Promise<Author> {
-    return this.authorsRepository.save(author);
+    return this.repo.save(author);
+  }
+
+  async update(id: number, author: Author): Promise<Author> {
+    const existing = await this.findOne(id);
+    const updated = Object.assign(existing, author);
+    return this.repo.save(updated);
   }
 
   async delete(id: number): Promise<void> {
-    await this.authorsRepository.delete(id);
+    await this.repo.delete(id);
   }
 }
